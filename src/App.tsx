@@ -11,6 +11,11 @@ interface Entry {
   label: string;
   amount: number;
 }
+interface Finance {
+  entries: Entry[];
+  /** Stated by the API, not added up here. See the note in vite.config.ts. */
+  total: number | null;
+}
 interface Session {
   id: string;
   week: number;
@@ -30,6 +35,7 @@ async function load<T>(path: string, fallback: T): Promise<T> {
 export function App() {
   const [players, setPlayers] = useState<Player[] | null>(null);
   const [entries, setEntries] = useState<Entry[] | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -38,21 +44,20 @@ export function App() {
     void (async () => {
       const [p, f, a] = await Promise.all([
         load<{ players: Player[] } | null>("/api/players", null),
-        load<{ entries: Entry[] } | null>("/api/finance", null),
+        load<Finance | null>("/api/finance", null),
         load<{ sessions: Session[] } | null>("/api/attendance", null),
       ]);
       if (!live) return;
       setFailed(p === null || f === null || a === null);
       setPlayers(p?.players ?? []);
       setEntries(f?.entries ?? []);
+      setTotal(f?.total ?? null);
       setSessions(a?.sessions ?? []);
     })();
     return () => {
       live = false;
     };
   }, []);
-
-  const total = (entries ?? []).reduce((sum, entry) => sum + entry.amount, 0);
 
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", padding: 32, maxWidth: 720 }}>
@@ -79,7 +84,14 @@ export function App() {
       </table>
 
       <h2>Finance</h2>
-      <p data-testid="finance-total">Total income: {total}</p>
+      <ul>
+        {(entries ?? []).map((entry) => (
+          <li key={entry.id} data-testid="finance-row">
+            {entry.label}: <span data-testid="finance-amount">{entry.amount}</span>
+          </li>
+        ))}
+      </ul>
+      <p data-testid="finance-total">Total income: {total ?? ""}</p>
 
       <h2>Attendance</h2>
       <ul>

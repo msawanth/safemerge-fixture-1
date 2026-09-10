@@ -10,11 +10,21 @@ const DATA: Record<string, unknown> = {
       { id: "p3", name: "Amara Okafor", shirt: 3, goals: 9 },
     ],
   },
+  /*
+    `total` is sent by the server, NOT computed from `entries`.
+
+    That is the whole point of it. A total the page adds up itself agrees with
+    its own rows by construction and can never disagree with them, so a test
+    comparing the two proves nothing. A total the API states separately CAN
+    disagree - and under a wrong-value mutation it does, because 2400 and 860
+    are rewritten one way and 3260 another.
+  */
   "/api/finance": {
     entries: [
       { id: "f1", label: "Sponsorship", amount: 2400 },
       { id: "f2", label: "Subs", amount: 860 },
     ],
+    total: 3260,
   },
   "/api/attendance": {
     sessions: [
