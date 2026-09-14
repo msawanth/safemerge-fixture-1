@@ -1,58 +1,57 @@
+/// <reference types="vite/client" />
 import { useEffect, useState } from "react";
 
-interface Player {
-  id: string;
+interface Listed {
   name: string;
-  shirt: number;
-  goals: number;
+  url: string;
 }
-interface Entry {
-  id: string;
-  label: string;
-  amount: number;
-}
-interface Finance {
-  entries: Entry[];
-  /** Stated by the API, not added up here. See the note in vite.config.ts. */
-  total: number | null;
-}
-interface Session {
-  id: string;
-  week: number;
-  present: number;
+interface Berry {
+  name: string;
+  growth_time: number;
+  max_harvest: number;
 }
 
-async function load<T>(path: string, fallback: T): Promise<T> {
+/*
+  Two data calls, written the two ways a split frontend reaches its backend.
+
+  The list is fetched from a RELATIVE path. In production something in front of
+  this app routes /api to the real backend; in a sandbox nothing does, so the
+  dev server is asked for a path it has never heard of. That is the case the
+  API bridge forwards.
+
+  The berry is fetched from VITE_API_URL when the environment provides one, and
+  from the same relative path when it does not. SafeMerge injects that variable
+  when it boots the app, so this call exercises the injection half of the
+  bridge rather than the forwarding half.
+*/
+const API = import.meta.env.VITE_API_URL ?? "";
+
+async function load<T>(path: string): Promise<T | null> {
   try {
     const response = await fetch(path);
-    if (!response.ok) return fallback;
+    if (!response.ok) return null;
     return (await response.json()) as T;
   } catch {
-    return fallback;
+    return null;
   }
 }
 
 export function App() {
-  const [players, setPlayers] = useState<Player[] | null>(null);
-  const [entries, setEntries] = useState<Entry[] | null>(null);
-  const [total, setTotal] = useState<number | null>(null);
-  const [sessions, setSessions] = useState<Session[] | null>(null);
+  const [pokemon, setPokemon] = useState<Listed[] | null>(null);
+  const [berry, setBerry] = useState<Berry | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let live = true;
     void (async () => {
-      const [p, f, a] = await Promise.all([
-        load<{ players: Player[] } | null>("/api/players", null),
-        load<Finance | null>("/api/finance", null),
-        load<{ sessions: Session[] } | null>("/api/attendance", null),
+      const [list, cheri] = await Promise.all([
+        load<{ results: Listed[] }>("/api/v2/pokemon?limit=3"),
+        load<Berry>(`${API}/api/v2/berry/1`),
       ]);
       if (!live) return;
-      setFailed(p === null || f === null || a === null);
-      setPlayers(p?.players ?? []);
-      setEntries(f?.entries ?? []);
-      setTotal(f?.total ?? null);
-      setSessions(a?.sessions ?? []);
+      setFailed(list === null || cheri === null);
+      setPokemon(list?.results ?? []);
+      setBerry(cheri);
     })();
     return () => {
       live = false;
@@ -61,46 +60,29 @@ export function App() {
 
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", padding: 32, maxWidth: 720 }}>
-      <h1>Squad</h1>
-      {failed && <p data-testid="load-error">Could not load the club&apos;s data.</p>}
+      <h1>Pokédex</h1>
+      {failed && <p data-testid="load-error">Could not reach the Pokédex API.</p>}
 
-      <table>
-        <thead>
-          <tr>
-            <th>Player</th>
-            <th>Goals</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(players ?? []).map((player) => (
-            <tr key={player.id} data-testid="player-row">
-              <td>
-                {player.name} &middot; #{player.shirt}
-              </td>
-              <td data-testid="player-goals">{player.goals}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h2>Finance</h2>
+      <h2>First three</h2>
       <ul>
-        {(entries ?? []).map((entry) => (
-          <li key={entry.id} data-testid="finance-row">
-            {entry.label}: <span data-testid="finance-amount">{entry.amount}</span>
+        {(pokemon ?? []).map((entry) => (
+          <li key={entry.name} data-testid="pokemon-row">
+            {entry.name}
           </li>
         ))}
       </ul>
-      <p data-testid="finance-total">Total income: {total ?? ""}</p>
 
-      <h2>Attendance</h2>
-      <ul>
-        {(sessions ?? []).map((session) => (
-          <li key={session.id} data-testid="session-row">
-            Week {session.week}: {session.present} present
-          </li>
-        ))}
-      </ul>
+      <h2>Berry</h2>
+      {berry && (
+        <dl>
+          <dt>Name</dt>
+          <dd data-testid="berry-name">{berry.name}</dd>
+          <dt>Growth time</dt>
+          <dd data-testid="berry-growth">{berry.growth_time}</dd>
+          <dt>Max harvest</dt>
+          <dd data-testid="berry-harvest">{berry.max_harvest}</dd>
+        </dl>
+      )}
     </main>
   );
 }
