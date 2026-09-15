@@ -160,7 +160,7 @@ export function App() {
             )}
           </nav>
           {path === "/" ? (
-            <SquadPage token={token} />
+            <SquadPage token={token} canAdd={user.role === "admin"} />
           ) : path === "/attendance" ? (
             <AttendancePage token={token} />
           ) : path === "/finance" ? (
@@ -240,11 +240,13 @@ function useData<T>(path: string, token: string): Reply<T> | null {
   return reply;
 }
 
-function SquadPage({ token }: { token: string }) {
-  const reply = useData<{ players: Player[] }>("/api/players", token);
+function SquadPage({ token, canAdd }: { token: string; canAdd: boolean }) {
+  const [version, setVersion] = useState(0);
+  const reply = useData<{ players: Player[] }>(`/api/players?v=${version}`, token);
   return (
     <section>
       <h1>Squad</h1>
+      {canAdd && <AddPlayer token={token} onAdded={() => setVersion((v) => v + 1)} />}
       {reply === null ? (
         <p>Loading…</p>
       ) : reply.status !== 200 ? (
@@ -270,6 +272,50 @@ function SquadPage({ token }: { token: string }) {
         </table>
       )}
     </section>
+  );
+}
+
+function AddPlayer({ token, onAdded }: { token: string; onAdded: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    setError(null);
+    const reply = await call<{ player: Player; error?: string }>("/api/players", token, {
+      method: "POST",
+      body: JSON.stringify({
+        name: form.get("name"),
+        shirt: Number(form.get("shirt")),
+        goals: Number(form.get("goals") || 0),
+      }),
+    });
+    if (reply.status === 201) {
+      formElement.reset();
+      onAdded();
+    } else {
+      setError(reply.status === 403 ? "You do not have permission to add players." : "Could not add the player.");
+    }
+  };
+
+  return (
+    <form aria-label="Add a player" onSubmit={submit} style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
+      <label>
+        Name
+        <input name="name" required />
+      </label>
+      <label>
+        Shirt number
+        <input name="shirt" type="number" required />
+      </label>
+      <label>
+        Goals
+        <input name="goals" type="number" defaultValue={0} />
+      </label>
+      <button type="submit">Add player</button>
+      {error && <p role="alert">{error}</p>}
+    </form>
   );
 }
 

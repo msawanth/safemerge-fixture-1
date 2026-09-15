@@ -76,6 +76,9 @@ const DATA: Record<string, { roles: Role[]; body: unknown }> = {
 /** Sessions live as long as the dev server does. */
 const SESSIONS = new Map<string, Account>();
 
+/** The squad, which an administrator can add to. Lives as long as the dev server does. */
+const SQUAD = (DATA["/api/players"]!.body as { players: { id: string; name: string; shirt: number; goals: number }[] }).players;
+
 /*
   `expiresIn` is a number on purpose. SafeMerge's wrong-value mutation rewrites
   numbers and leaves strings alone whenever a response has one, so this keeps the
@@ -147,6 +150,48 @@ function mockApi(): Plugin {
           const account = sessionFor(req);
           if (!account) send(res, 401, { error: "Sign in first." });
           else send(res, 200, { user: publicUser(account), expiresIn: SESSION_SECONDS });
+          return;
+        }
+
+        if (url === "/api/players" && method === "POST") {
+          const account = sessionFor(req);
+          if (!account) {
+            send(res, 401, { error: "Sign in first." });
+            return;
+          }
+          if (account.role !== "admin") {
+            send(res, 403, { error: "You do not have permission to add players." });
+            return;
+          }
+          void readJson(req).then((body) => {
+            const name = typeof body["name"] === "string" ? body["name"].trim() : "";
+            const shirt = Number(body["shirt"]);
+            const goals = Number(body["goals"] ?? 0);
+            if (!name || !Number.isInteger(shirt) || !Number.isInteger(goals)) {
+              send(res, 400, { error: "A player needs a name, a shirt number and a goal count." });
+              return;
+            }
+            const player = { id: `p${randomBytes(4).toString("hex")}`, name, shirt, goals };
+            SQUAD.push(player);
+            send(res, 201, { player });
+          });
+          return;
+        }
+
+        const removal = url.match(/^\/api\/players\/([\w-]+)$/);
+        if (removal && method === "DELETE") {
+          const account = sessionFor(req);
+          if (!account) {
+            send(res, 401, { error: "Sign in first." });
+            return;
+          }
+          if (account.role !== "admin") {
+            send(res, 403, { error: "You do not have permission to remove players." });
+            return;
+          }
+          const at = SQUAD.findIndex((player) => player.id === removal[1]);
+          if (at !== -1) SQUAD.splice(at, 1);
+          send(res, 200, { removed: at !== -1, remaining: SQUAD.length });
           return;
         }
 
