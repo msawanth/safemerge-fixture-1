@@ -1,0 +1,113 @@
+# SafeMerge: the regression catch rate on every pull request, and on every push to your default branch.
+#
+# Generated for the SafeMerge project "safemerge-fixture-1". Commit it as .github/workflows/safemerge.yml
+# and add one repository secret, SAFEMERGE_API_KEY, holding an API key from SafeMerge organisation settings.
+#
+# The job finishes in seconds. The check "SafeMerge / regression catch rate" appears on the commit at once
+# and updates itself when the measurement lands; nothing holds the job open while it runs.
+name: SafeMerge
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+# The job calls SafeMerge, not GitHub, so its own token needs nothing.
+permissions: {}
+
+jobs:
+  catch-rate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask SafeMerge to measure this commit
+        env:
+          SAFEMERGE_API_URL: "https://utopia-bottling-unchanged.ngrok-free.dev"
+          SAFEMERGE_PROJECT_ID: "601a4ce5-b560-416f-8390-b93f8716d569"
+          SAFEMERGE_API_KEY: ${{ secrets.SAFEMERGE_API_KEY }}
+        run: |
+          node --input-type=module <<'SAFEMERGE_SCRIPT'
+          import { appendFileSync, readFileSync } from "node:fs";
+
+          const env = process.env;
+
+          function annotate(level, message) {
+            // GitHub's workflow-command escaping, so a message with a newline stays one annotation.
+            console.log("::" + level + "::" + String(message).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A"));
+          }
+
+          function output(name, value) {
+            if (env.GITHUB_OUTPUT && value !== null && value !== undefined) appendFileSync(env.GITHUB_OUTPUT, name + "=" + value + "\n");
+          }
+
+          const payload = env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")) : {};
+          const pr = payload.pull_request;
+          const fromFork = Boolean(pr && pr.head && pr.head.repo && payload.repository && pr.head.repo.full_name !== payload.repository.full_name);
+
+          if (!env.SAFEMERGE_API_KEY) {
+            if (fromFork) {
+              annotate("notice", "Pull requests from forks cannot read repository secrets, so SafeMerge was not asked to measure this one.");
+              process.exit(0);
+            }
+            annotate("error", "SAFEMERGE_API_KEY is not set. Add an API key from SafeMerge organisation settings as a repository secret with that name.");
+            process.exit(1);
+          }
+
+          // The commit the check belongs on. On a pull request that is the head commit - GITHUB_SHA there is a merge commit on no branch.
+          let headSha = env.GITHUB_SHA;
+          let branch = null;
+          if (pr) {
+            headSha = pr.head.sha;
+            branch = fromFork ? null : pr.head.ref;
+          } else if (env.GITHUB_EVENT_NAME === "merge_group" && payload.merge_group) {
+            headSha = payload.merge_group.head_sha;
+          } else if ((env.GITHUB_REF || "").startsWith("refs/heads/")) {
+            branch = env.GITHUB_REF_NAME;
+          }
+
+          if (env.GITHUB_EVENT_NAME === "push" && /^0+$/.test(payload.after || "")) {
+            annotate("notice", "This push deleted a branch, so there is no commit to measure.");
+            process.exit(0);
+          }
+
+          const body = { projectId: env.SAFEMERGE_PROJECT_ID, headSha: headSha };
+          if (branch) body.branch = branch;
+
+          let response;
+          try {
+            response = await fetch(env.SAFEMERGE_API_URL.replace(/\/+$/, "") + "/api/ci/checks", {
+              method: "POST",
+              headers: { Authorization: "Bearer " + env.SAFEMERGE_API_KEY, "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(30000),
+            });
+          } catch (error) {
+            annotate("error", "Could not reach SafeMerge at " + env.SAFEMERGE_API_URL + ": " + (error && error.message ? error.message : error));
+            process.exit(1);
+          }
+
+          let result = {};
+          try {
+            result = await response.json();
+          } catch {
+            result = {};
+          }
+
+          if (response.status === 202) {
+            output("run-id", result.runId);
+            output("check-run-id", result.checkRunId);
+            output("branch", result.branch);
+            console.log("SafeMerge is measuring " + headSha.slice(0, 7) + (result.branch ? " on " + result.branch : "") + ". The check on this commit updates itself when the measurement lands.");
+            if (result.branchNote) annotate("warning", result.branchNote);
+            process.exit(0);
+          }
+
+          if (response.status === 409) {
+            // The check was opened and closed as neutral, saying why; failing the job as well would be two alarms for one busy project.
+            annotate("warning", (result.error || "Another SafeMerge run is already going on this project.") + " This commit was not measured - re-run this job once it finishes.");
+            process.exit(0);
+          }
+
+          annotate("error", "SafeMerge did not start a check (HTTP " + response.status + "): " + (result.error || response.statusText));
+          process.exit(1);
+          SAFEMERGE_SCRIPT
